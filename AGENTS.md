@@ -157,17 +157,8 @@ gh pr create --base main --title "issue/<id>: ..." --body "Closes bd <id>"
 ```
 
 
-5. **PUSH TO REMOTE** - This is MANDATORY:
-```bash
-git pull --rebase origin main
-bd dolt push
-git push -u origin issue/<id>
-git status  # MUST show "up to date with origin"
 
-```
-
-
-6. **Clean up** - Clear stashes, switch back to main, and prune remote branches:
+5. **Clean up** - Clear stashes, switch back to main, and prune remote branches:
 ```bash
 git checkout main
 git pull --rebase
@@ -177,7 +168,7 @@ git remote prune origin
 ```
 
 
-7. **Verify & Hand off** - Ensure all changes are committed AND pushed. Provide context for the next session.
+6. **Verify & Hand off** - Ensure all changes are committed AND pushed. Provide context for the next session.
 
 **CRITICAL RULES:**
 
