@@ -6,6 +6,8 @@
 #   "rich",
 #   "httpx",
 #   "jinja2",
+#   "fastapi",
+#   "uvicorn[standard]",
 # ]
 # ///
 
