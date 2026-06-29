@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.parse import quote as _url_quote
 
 from jinja2 import Environment
 
@@ -199,6 +200,233 @@ def render_html(
         scanned_at=scanned_at,
         diff=diff,
     )
+
+
+SHELL_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Frigate Open Instances</title>
+<script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; padding: 2rem; }
+  h1 { font-size: 1.5rem; font-weight: 700; color: #38bdf8; margin-bottom: 1rem; }
+  .stats-bar { display: flex; gap: 2rem; margin-bottom: 2rem; padding: 1rem 1.5rem; background: #1e293b; border-radius: 0.75rem; }
+  .stat { display: flex; flex-direction: column; }
+  .stat-value { font-size: 1.75rem; font-weight: 700; color: #38bdf8; }
+  .stat-label { font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; }
+  .filters { display: flex; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap; align-items: center; }
+  .filter-btn { padding: 0.375rem 0.875rem; border-radius: 999px; border: 1px solid #334155; background: transparent; color: #94a3b8; cursor: pointer; font-size: 0.8125rem; transition: all 0.15s; }
+  .filter-btn:hover, .filter-btn.active { background: #38bdf8; border-color: #38bdf8; color: #0f172a; font-weight: 600; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 1rem; }
+  .card { background: #1e293b; border-radius: 0.75rem; padding: 1.25rem; border: 1px solid #334155; transition: border-color 0.15s; cursor: pointer; }
+  .card:hover { border-color: #38bdf8; }
+  .card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.875rem; }
+  .card-url { font-size: 0.9375rem; font-weight: 600; color: #38bdf8; word-break: break-all; text-decoration: none; }
+  .card-url:hover { text-decoration: underline; }
+  .badge { font-size: 0.6875rem; padding: 0.2rem 0.5rem; border-radius: 999px; font-weight: 600; white-space: nowrap; }
+  .badge-country { background: #1e3a5f; color: #7dd3fc; }
+  .badge-new { background: #166534; color: #86efac; }
+  .card.is-new { border-color: #22c55e; }
+  .meta { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.875rem; }
+  .meta-item { font-size: 0.75rem; color: #64748b; display: flex; align-items: center; gap: 0.3rem; }
+  .meta-item strong { color: #94a3b8; }
+  .cameras-label { font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.4rem; }
+  .cameras { display: flex; flex-wrap: wrap; gap: 0.375rem; }
+  .cam-chip { font-size: 0.75rem; padding: 0.2rem 0.6rem; background: #0f172a; border: 1px solid #334155; border-radius: 999px; color: #94a3b8; }
+  .org { font-size: 0.8125rem; color: #64748b; margin-bottom: 0.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .search-wrap { flex: 1; min-width: 200px; }
+  input[type=search] { width: 100%; padding: 0.375rem 0.875rem; border-radius: 999px; border: 1px solid #334155; background: #1e293b; color: #e2e8f0; font-size: 0.8125rem; outline: none; }
+  input[type=search]:focus { border-color: #38bdf8; }
+  .count-display { color: #64748b; font-size: 0.8125rem; margin-left: auto; align-self: center; }
+  .pagination { display: flex; align-items: center; gap: 1rem; margin-top: 1.5rem; justify-content: center; color: #64748b; font-size: 0.875rem; }
+  .page-btn { padding: 0.375rem 0.875rem; border-radius: 999px; border: 1px solid #334155; background: transparent; color: #94a3b8; cursor: pointer; font-size: 0.8125rem; }
+  .page-btn:hover { border-color: #38bdf8; color: #38bdf8; }
+  #detail-panel { display: none; background: #1e293b; border-radius: 0.75rem; padding: 1.5rem; margin-top: 1.5rem; border: 1px solid #334155; }
+  .detail-close { float: right; padding: 0.25rem 0.75rem; border-radius: 999px; border: 1px solid #475569; background: transparent; color: #94a3b8; cursor: pointer; font-size: 0.8125rem; }
+  .detail-close:hover { border-color: #f87171; color: #f87171; }
+  .detail-url { font-size: 1rem; font-weight: 600; color: #38bdf8; word-break: break-all; text-decoration: none; margin-bottom: 1rem; display: block; }
+  .detail-meta { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.75rem; margin-bottom: 1.25rem; clear: both; }
+  .detail-meta-item { display: flex; flex-direction: column; }
+  .detail-meta-label { font-size: 0.6875rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.2rem; }
+  .detail-meta-value { font-size: 0.875rem; color: #e2e8f0; }
+  table.cam-table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; margin-top: 1rem; }
+  .cam-table th { text-align: left; color: #64748b; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 0 0 0.5rem; }
+  .cam-table td { padding: 0.3rem 0; border-top: 1px solid #334155; color: #94a3b8; }
+  .cam-table td:first-child { color: #e2e8f0; }
+</style>
+</head>
+<body>
+<nav style="margin-bottom:1.5rem;display:flex;gap:1rem">
+  <a href="/" style="color:#38bdf8;text-decoration:none;font-size:0.875rem;font-weight:600;padding:0.375rem 0.875rem;border-radius:999px;border:1px solid #38bdf8">Live View</a>
+  <a href="/trends" style="color:#64748b;text-decoration:none;font-size:0.875rem;padding:0.375rem 0.875rem;border-radius:999px;border:1px solid #334155">Trends</a>
+</nav>
+<h1>Frigate Open Instances</h1>
+<div class="filters">
+  <div class="search-wrap">
+    <input type="search" name="q" id="search-input"
+      hx-get="/fragments/cards"
+      hx-target="#filterable"
+      hx-trigger="input changed delay:400ms, search"
+      hx-include="#country-input"
+      hx-swap="innerHTML"
+      placeholder="Search URL, org, camera…">
+  </div>
+</div>
+<input type="hidden" name="country" id="country-input" value="">
+<div id="filterable"
+  hx-get="/fragments/cards"
+  hx-trigger="load, filter-changed"
+  hx-include="#search-input,#country-input"
+  hx-swap="innerHTML">
+</div>
+<aside id="detail-panel"></aside>
+<script>
+function setCountry(cc) {
+  document.getElementById('country-input').value = cc;
+  document.getElementById('filterable').dispatchEvent(new Event('filter-changed'));
+}
+htmx.on('#detail-panel', 'htmx:afterSwap', function (e) {
+  e.target.style.display = 'block';
+});
+</script>
+</body>
+</html>
+"""
+
+CARDS_FRAGMENT_TEMPLATE = """
+<div class="stats-bar">
+  <div class="stat"><span class="stat-value">{{ total }}</span><span class="stat-label">Open</span></div>
+  <div class="stat"><span class="stat-value">{{ total_cameras }}</span><span class="stat-label">Cameras</span></div>
+  <div class="stat"><span class="stat-value">{{ country_count }}</span><span class="stat-label">Countries</span></div>
+</div>
+<div class="filters">
+  <button class="filter-btn{{ ' active' if not country_filter else '' }}" onclick="setCountry('')">All countries</button>
+  {% for cc in countries %}
+  <button class="filter-btn{{ ' active' if country_filter == cc else '' }}" onclick="setCountry('{{ cc }}')">{{ cc }}</button>
+  {% endfor %}
+  <span class="count-display">{{ total }} shown</span>
+</div>
+<div class="grid">
+{% for r in instances %}
+  <div class="card{{ ' is-new' if r.is_new else '' }}"
+    hx-get="/instance?url={{ r.url|urlencode }}"
+    hx-target="#detail-panel"
+    hx-swap="innerHTML">
+    <div class="card-header">
+      <a class="card-url" href="{{ r.url }}" target="_blank" rel="noopener" onclick="event.stopPropagation()">{{ r.url }}</a>
+      <div style="display:flex;gap:0.35rem;flex-wrap:wrap;justify-content:flex-end">
+        {% if r.is_new %}<span class="badge badge-new">NEW</span>{% endif %}
+        {% if r.country_code %}<span class="badge badge-country">{{ r.country_code }}</span>{% endif %}
+      </div>
+    </div>
+    {% if r.org %}<div class="org">{{ r.org }}</div>{% endif %}
+    <div class="meta">
+      {% if r.frigate_version %}<span class="meta-item"><strong>v</strong>{{ r.frigate_version }}</span>{% endif %}
+      <span class="meta-item"><strong>{{ r.camera_count or 0 }}</strong>&nbsp;cam{{ 's' if (r.camera_count or 0) != 1 else '' }}</span>
+      {% if r.port %}<span class="meta-item">:{{ r.port }}</span>{% endif %}
+    </div>
+    {% if r.cameras %}
+    <div class="cameras-label">Cameras</div>
+    <div class="cameras">
+      {% for cam in r.cameras %}<span class="cam-chip">{{ cam.name }}</span>{% endfor %}
+    </div>
+    {% endif %}
+  </div>
+{% endfor %}
+</div>
+{% if not instances %}
+<p style="color:#64748b;text-align:center;padding:3rem">No instances match your filter.</p>
+{% endif %}
+{% if total > page_size %}
+<div class="pagination">
+  {% if page > 1 %}
+  <button class="page-btn" hx-get="/fragments/cards?country={{ country_filter|urlencode }}&q={{ q|urlencode }}&page={{ page - 1 }}" hx-target="#filterable" hx-swap="innerHTML">&larr; Previous</button>
+  {% endif %}
+  <span>Showing {{ offset + 1 }}&ndash;{{ offset + instances|length }} of {{ total }}</span>
+  {% if has_next %}
+  <button class="page-btn" hx-get="/fragments/cards?country={{ country_filter|urlencode }}&q={{ q|urlencode }}&page={{ page + 1 }}" hx-target="#filterable" hx-swap="innerHTML">Next &rarr;</button>
+  {% endif %}
+</div>
+{% endif %}
+"""
+
+DETAIL_FRAGMENT_TEMPLATE = """
+<button class="detail-close" onclick="var p=document.getElementById('detail-panel');p.style.display='none';p.innerHTML=''">&#10005; Close</button>
+<a class="detail-url" href="{{ instance.url }}" target="_blank" rel="noopener">{{ instance.url }}</a>
+<div class="detail-meta">
+  {% if instance.country %}<div class="detail-meta-item"><span class="detail-meta-label">Country</span><span class="detail-meta-value">{{ instance.country }} ({{ instance.country_code or '??' }})</span></div>{% endif %}
+  {% if instance.org %}<div class="detail-meta-item"><span class="detail-meta-label">Org</span><span class="detail-meta-value">{{ instance.org }}</span></div>{% endif %}
+  {% if instance.ip %}<div class="detail-meta-item"><span class="detail-meta-label">IP</span><span class="detail-meta-value">{{ instance.ip }}</span></div>{% endif %}
+  {% if instance.port %}<div class="detail-meta-item"><span class="detail-meta-label">Port</span><span class="detail-meta-value">{{ instance.port }}</span></div>{% endif %}
+  {% if instance.frigate_version %}<div class="detail-meta-item"><span class="detail-meta-label">Version</span><span class="detail-meta-value">{{ instance.frigate_version }}</span></div>{% endif %}
+  <div class="detail-meta-item"><span class="detail-meta-label">First Seen</span><span class="detail-meta-value">{{ instance.first_seen[:10] }}</span></div>
+  <div class="detail-meta-item"><span class="detail-meta-label">Last Seen</span><span class="detail-meta-value">{{ instance.last_seen[:10] }}</span></div>
+</div>
+{% if cameras %}
+<div class="cameras-label" style="margin-bottom:0.5rem">Cameras ({{ cameras|length }})</div>
+<table class="cam-table">
+  <thead><tr><th>Name</th><th>First Seen</th><th>Last Seen</th></tr></thead>
+  <tbody>
+    {% for cam in cameras %}
+    <tr><td>{{ cam.name }}</td><td>{{ cam.first_seen[:10] }}</td><td>{{ cam.last_seen[:10] }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p style="color:#64748b;font-size:0.875rem">No cameras recorded.</p>
+{% endif %}
+"""
+
+
+def _fragment_env() -> Environment:
+    env = Environment(autoescape=True)
+    env.filters["urlencode"] = _url_quote
+    return env
+
+
+def render_shell() -> str:
+    """Render the HTMX shell page — loads the card grid fragment on page load."""
+    return SHELL_TEMPLATE
+
+
+def render_cards_fragment(
+    instances: list[dict],
+    countries: list[str],
+    total: int,
+    total_cameras: int,
+    page: int,
+    page_size: int,
+    country_filter: str,
+    q: str,
+) -> str:
+    """Render the filtered/paginated card grid fragment (no page wrapper)."""
+    env = _fragment_env()
+    tmpl = env.from_string(CARDS_FRAGMENT_TEMPLATE)
+    offset = (page - 1) * page_size
+    has_next = offset + len(instances) < total
+    return tmpl.render(
+        instances=instances,
+        countries=countries,
+        total=total,
+        total_cameras=total_cameras,
+        country_count=len(countries),
+        page=page,
+        page_size=page_size,
+        country_filter=country_filter,
+        q=q,
+        offset=offset,
+        has_next=has_next,
+    )
+
+
+def render_detail_fragment(instance: dict, cameras: list[dict]) -> str:
+    """Render the instance detail panel fragment (no page wrapper)."""
+    env = _fragment_env()
+    tmpl = env.from_string(DETAIL_FRAGMENT_TEMPLATE)
+    return tmpl.render(instance=instance, cameras=cameras)
 
 
 def write_jsonl(instances: list[dict], path: Path) -> None:

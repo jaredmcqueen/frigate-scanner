@@ -60,38 +60,105 @@ class TestHealth:
 
 class TestIndex:
     def test_missing_db_returns_200(self, db: Path):
-        # DB file does not exist — app should return 200 with a placeholder page
+        # The shell page does not touch the DB directly — always 200
         client = TestClient(create_app(db))
         resp = client.get("/")
+        assert resp.status_code == 200
+
+    def test_htmx_script_present(self, client: TestClient):
+        resp = client.get("/")
+        assert "htmx.org" in resp.text
+
+    def test_cards_fragment_load_trigger_present(self, client: TestClient):
+        resp = client.get("/")
+        assert 'hx-get="/fragments/cards"' in resp.text
+
+    def test_search_input_present(self, client: TestClient):
+        resp = client.get("/")
+        assert 'id="search-input"' in resp.text
+
+    def test_detail_panel_present(self, client: TestClient):
+        resp = client.get("/")
+        assert 'id="detail-panel"' in resp.text
+
+    def test_nav_link_to_trends_present(self, client: TestClient):
+        resp = client.get("/")
+        assert 'href="/trends"' in resp.text
+
+
+class TestCardsFragment:
+    def test_missing_db_returns_200(self, db: Path):
+        client = TestClient(create_app(db))
+        resp = client.get("/fragments/cards")
         assert resp.status_code == 200
 
     def test_missing_db_shows_no_data_message(self, db: Path):
         client = TestClient(create_app(db))
-        resp = client.get("/")
+        resp = client.get("/fragments/cards")
         assert "No scan data" in resp.text
 
     def test_seeded_db_returns_html(self, seeded_client: TestClient):
-        resp = seeded_client.get("/")
+        resp = seeded_client.get("/fragments/cards")
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
 
     def test_instance_urls_in_response(self, seeded_client: TestClient):
-        resp = seeded_client.get("/")
+        resp = seeded_client.get("/fragments/cards")
         assert "10.0.0.1:8971" in resp.text
         assert "10.0.0.2:8971" in resp.text
 
     def test_camera_names_in_response(self, seeded_client: TestClient):
-        resp = seeded_client.get("/")
+        resp = seeded_client.get("/fragments/cards")
         assert "front" in resp.text
         assert "garage" in resp.text
 
     def test_country_filter_button_rendered(self, seeded_client: TestClient):
-        resp = seeded_client.get("/")
-        assert 'data-country="US"' in resp.text
+        resp = seeded_client.get("/fragments/cards")
+        assert ">US<" in resp.text
+
+    def test_country_filter_excludes_other_countries(self, db: Path):
+        us = make_instance("http://10.0.0.1:8971", ["front"])
+        de = {**make_instance("http://10.0.0.2:8971", ["garage"]), "country_code": "DE", "country": "Germany"}
+        _seed_db(db, [us, de])
+        client = TestClient(create_app(db))
+        resp = client.get("/fragments/cards?country=US")
+        assert "10.0.0.1:8971" in resp.text
+        assert "10.0.0.2:8971" not in resp.text
+
+    def test_search_filter_matches_url(self, seeded_client: TestClient):
+        resp = seeded_client.get("/fragments/cards?q=10.0.0.1")
+        assert "10.0.0.1:8971" in resp.text
+        assert "10.0.0.2:8971" not in resp.text
+
+    def test_search_filter_matches_org(self, db: Path):
+        inst = {**make_instance("http://10.0.0.1:8971", ["front"]), "org": "UniqueOrgName"}
+        _seed_db(db, [inst])
+        client = TestClient(create_app(db))
+        resp = client.get("/fragments/cards?q=UniqueOrgName")
+        assert "10.0.0.1:8971" in resp.text
+
+    def test_pagination_second_page(self, db: Path):
+        # URLs sort lexicographically; with 25 instances "10.0.0.5" lands on page 2
+        instances = [
+            make_instance(f"http://10.0.0.{i}:8971", [f"cam{i}"]) for i in range(1, 26)
+        ]
+        _seed_db(db, instances)
+        client = TestClient(create_app(db))
+        resp = client.get("/fragments/cards?page=2")
+        assert resp.status_code == 200
+        assert "10.0.0.5:8971" in resp.text
+        assert "10.0.0.1:8971" not in resp.text
+
+    def test_active_country_button_marked(self, seeded_client: TestClient):
+        resp = seeded_client.get("/fragments/cards?country=US")
+        assert "filter-btn active" in resp.text
+
+    def test_count_display_shows_total(self, seeded_client: TestClient):
+        resp = seeded_client.get("/fragments/cards")
+        assert "2 shown" in resp.text
 
     def test_new_badge_on_first_scan(self, seeded_client: TestClient):
-        # All instances in the first scan are "new" (no previous scan)
-        resp = seeded_client.get("/")
+        resp = seeded_client.get("/fragments/cards")
         assert 'class="badge badge-new"' in resp.text
 
     def test_second_scan_known_instances_not_new(self, db: Path):
@@ -99,18 +166,42 @@ class TestIndex:
         _seed_db(db, [inst], now="2024-01-01T00:00:00")
         _seed_db(db, [inst], now="2024-01-02T00:00:00")
         client = TestClient(create_app(db))
-        resp = client.get("/")
+        resp = client.get("/fragments/cards")
         assert resp.status_code == 200
-        # Known instance should not show NEW badge
         assert 'class="badge badge-new"' not in resp.text
 
     def test_stats_bar_shows_instance_count(self, seeded_client: TestClient):
-        resp = seeded_client.get("/")
+        resp = seeded_client.get("/fragments/cards")
         assert "stat-value" in resp.text
 
-    def test_nav_link_to_trends_present(self, seeded_client: TestClient):
-        resp = seeded_client.get("/")
-        assert 'href="/trends"' in resp.text
+
+class TestInstanceDetail:
+    def test_returns_200_for_known_url(self, seeded_client: TestClient):
+        resp = seeded_client.get("/instance", params={"url": "http://10.0.0.1:8971"})
+        assert resp.status_code == 200
+
+    def test_shows_camera_names(self, seeded_client: TestClient):
+        resp = seeded_client.get("/instance", params={"url": "http://10.0.0.1:8971"})
+        assert "front" in resp.text
+        assert "back" in resp.text
+
+    def test_shows_first_and_last_seen(self, seeded_client: TestClient):
+        resp = seeded_client.get("/instance", params={"url": "http://10.0.0.1:8971"})
+        assert "2024-01-01" in resp.text
+
+    def test_shows_org_and_version(self, seeded_client: TestClient):
+        resp = seeded_client.get("/instance", params={"url": "http://10.0.0.1:8971"})
+        assert "Acme Corp" in resp.text
+        assert "0.14.0" in resp.text
+
+    def test_unknown_url_returns_404(self, seeded_client: TestClient):
+        resp = seeded_client.get("/instance", params={"url": "http://unknown:9999"})
+        assert resp.status_code == 404
+
+    def test_missing_db_returns_404(self, db: Path):
+        client = TestClient(create_app(db))
+        resp = client.get("/instance", params={"url": "http://10.0.0.1:8971"})
+        assert resp.status_code == 404
 
 
 class TestTrends:
