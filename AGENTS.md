@@ -26,7 +26,7 @@ This file is the repo-specific workflow for AI agents. This project uses **bd (b
 
 ## Core Rules
 
-* Never commit to `main`.
+* **Branch Naming is Mandatory:** Never commit to `main`. You MUST ALWAYS create and work on a new branch named exactly after the beads task ID (e.g., `git checkout -b issue/<bd-id>`).
 * Use `bd` for ALL task tracking. Do not use TodoWrite, TaskCreate, or create markdown TODO lists.
 * Run `bd prime` for detailed command reference and session close protocol.
 * Use `bd remember` for persistent knowledge — do not use MEMORY.md files. Read memories with `bd memories --json`.
@@ -68,6 +68,8 @@ cp -rf source dest          # NOT: cp -r source dest
 
 ## Start Every Task
 
+**CRITICAL:** You must isolate your work by checking out a new branch tied directly to the issue ID before writing any code.
+
 ```bash
 bd memories --json
 bd ready --json
@@ -77,7 +79,7 @@ bd update <id> --claim --json
 
 ```
 
-If the issue already exists, skip `bd create` and use that id.
+If the issue already exists, skip `bd create` and use that existing id for your branch name.
 
 ## Beads Usage
 
@@ -150,15 +152,23 @@ bd close <id> --reason="Completed implementation for..."
 ```
 
 
-4. **Create Pull Request** - Ensure you use Conventional Commits and branch format `issue/<bd-id>`:
+4. **Create Pull Request** - Ensure you use Conventional Commits and that you are pushing your isolated task branch (`issue/<bd-id>`):
 ```bash
 gh pr create --base main --title "issue/<id>: ..." --body "Closes bd <id>"
 
 ```
 
 
+5. **PUSH TO REMOTE** - This is MANDATORY:
+```bash
+git pull --rebase origin main
+git push -u origin issue/<id>
+git status  # MUST show "up to date with origin"
 
-5. **Clean up** - Clear stashes, switch back to main, and prune remote branches:
+```
+
+
+6. **Clean up** - Clear stashes, switch back to main, and prune remote branches:
 ```bash
 git checkout main
 git pull --rebase
@@ -168,7 +178,7 @@ git remote prune origin
 ```
 
 
-6. **Verify & Hand off** - Ensure all changes are committed AND pushed. Provide context for the next session.
+7. **Verify & Hand off** - Ensure all changes are committed AND pushed. Provide context for the next session.
 
 **CRITICAL RULES:**
 
