@@ -61,6 +61,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 </style>
 </head>
 <body>
+<nav style="margin-bottom:1.5rem;display:flex;gap:1rem">
+  <a href="/" style="color:#38bdf8;text-decoration:none;font-size:0.875rem;font-weight:600;padding:0.375rem 0.875rem;border-radius:999px;border:1px solid #38bdf8">Live View</a>
+  <a href="/trends" style="color:#64748b;text-decoration:none;font-size:0.875rem;padding:0.375rem 0.875rem;border-radius:999px;border:1px solid #334155">Trends</a>
+</nav>
 <h1>Frigate Open Instances</h1>
 <p class="subtitle">Scanned {{ scanned_at }} &mdash; {{ total }} open instances found</p>
 <div class="stats-bar">
