@@ -1,0 +1,22 @@
+[project]
+name = "frigate-scanner"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "shodan",
+    "python-dotenv",
+    "rich",
+    "httpx",
+    "jinja2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src/backend"]
+asyncio_mode = "auto"
+testpaths = ["tests"]

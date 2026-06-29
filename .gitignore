@@ -23,12 +23,16 @@ frigate_open_*.html
 # ── Python ───────────────────────────────────────────────
 __pycache__/
 *.py[cod]
+*.egg-info/
 .venv/
 venv/
 .uv/
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+
+# ── AI tooling state (machine-local) ─────────────────────
+.codex/
 
 # ── Frontend (Node / Vite) ───────────────────────────────
 node_modules/
