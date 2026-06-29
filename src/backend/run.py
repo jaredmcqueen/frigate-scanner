@@ -126,6 +126,16 @@ def cmd_run(args: argparse.Namespace) -> None:
     _print_summary(console, open_instances, diff)
 
 
+def cmd_serve(args: argparse.Namespace) -> None:
+    """Start the FastAPI dashboard server."""
+    import uvicorn
+
+    from frigate_scanner.dashboard import create_app
+
+    app = create_app(Path(args.db))
+    uvicorn.run(app, host="0.0.0.0", port=args.port)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="frigate-scanner",
@@ -133,6 +143,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
     subparsers.required = True
+
+    serve_p = subparsers.add_parser("serve", help="Start the dashboard web server.")
+    serve_p.add_argument(
+        "--db",
+        default="frigate.db",
+        metavar="PATH",
+        help="SQLite database path (default: frigate.db).",
+    )
+    serve_p.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        metavar="PORT",
+        help="Port to listen on (default: 8000).",
+    )
+    serve_p.set_defaults(func=cmd_serve)
 
     run_p = subparsers.add_parser("run", help="Run a full scan cycle.")
     run_p.add_argument(
