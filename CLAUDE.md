@@ -52,18 +52,51 @@ bd close <id>         # Complete work
 
 ## Build & Test
 
-_Add your build and test commands here_
+```bash
+# Install dependencies (uses uv lockfile)
+uv sync
+
+# Run full test suite
+uv run pytest
+
+# Run with coverage
+uv run pytest --cov=src --cov-report=term-missing
+
+# Lint / format
+uv run ruff check src tests
+uv run ruff format src tests
+```
+
+## Single Daily Command
 
 ```bash
-# Example:
-# npm install
-# npm test
+# Scan Shodan, probe open instances, persist to SQLite, print summary
+uv run src/backend/run.py run
+
+# View results in the web dashboard
+uv run src/backend/run.py serve
 ```
+
+Requires `SHODAN_API_KEY` in `.env` (copy `.env.example`).
 
 ## Architecture Overview
 
-_Add a brief overview of your project architecture_
+```
+src/backend/
+  run.py                        # CLI entrypoint — two subcommands: run, serve
+  frigate_scanner/
+    search.py                   # Shodan queries → list of host dicts
+    probe.py                    # Async /api/stats probing → open instances
+    store.py                    # SQLite persistence + diff vs. previous scan
+    report.py                   # HTML renderer + JSONL/HTML writers (utilities)
+    dashboard.py                # FastAPI app serving live card view from DB
+```
+
+**Data flow:** `search` → `probe` → `store` (SQLite `frigate.db`) → terminal summary.
+The `serve` command reads from `frigate.db` and exposes a live dashboard on port 8000.
 
 ## Conventions & Patterns
 
-_Add your project-specific conventions here_
+- SQLite (`frigate.db`) is the primary history store; `.gitignore` excludes it.
+- The package lives in `src/backend/frigate_scanner/`; `run.py` is the CLI shim.
+- `uv run` handles the venv — no manual `pip install` or `source .venv/bin/activate`.
