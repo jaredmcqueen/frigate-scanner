@@ -181,24 +181,6 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="SQLite database path (default: frigate.db).",
     )
-    run_p.add_argument(
-        "--out-dir",
-        default=".",
-        metavar="DIR",
-        help="Directory for output files (default: current dir).",
-    )
-    run_p.add_argument(
-        "--jsonl-out",
-        default=None,
-        metavar="PATH",
-        help="Explicit JSONL output path (overrides --out-dir timestamp name).",
-    )
-    run_p.add_argument(
-        "--html-out",
-        default=None,
-        metavar="PATH",
-        help="Explicit HTML output path (overrides --out-dir timestamp name).",
-    )
     run_p.set_defaults(func=cmd_run)
 
     return parser

@@ -1,13 +1,20 @@
 # frigate-scanner
 
-Searches Shodan for publicly exposed [Frigate NVR](https://frigate.video) instances and writes results to JSONL.
+Discovers publicly exposed [Frigate NVR](https://frigate.video) instances via Shodan, probes each for open access, persists history to SQLite, and serves a live web dashboard.
 
 ## Layout
 
 ```
 src/
-  backend/    # scanner scripts + Dockerfile (scan.py, check_open.py)
-  frontend/   # dashboard UI (stub — not scaffolded yet)
+  backend/
+    run.py                     # CLI entrypoint (run / serve subcommands)
+    frigate_scanner/
+      search.py                # Shodan queries → host list
+      probe.py                 # Async /api/stats probing
+      store.py                 # SQLite persistence + scan diff
+      report.py                # HTML renderer utilities
+      dashboard.py             # FastAPI live dashboard
+  frontend/                    # dashboard UI (stub)
 ```
 
 ## Setup
@@ -22,20 +29,35 @@ SHODAN_API_KEY=your_key_here
 
 ## Usage
 
-Run a full scan cycle (search → probe → store → summary):
+Run a full scan cycle (search → probe → store → terminal summary):
 
 ```bash
 uv run src/backend/run.py run
 ```
 
-Key flags:
+Key flags for `run`:
 
 | Flag | Default | Description |
 |---|---|---|
 | `--db PATH` | `frigate.db` | SQLite database path |
-| `--out-dir DIR` | `.` | Directory for JSONL/HTML output |
 | `--workers N` | `20` | Concurrent probe workers |
 | `--timeout SECS` | `10.0` | Per-request timeout |
+
+### Dashboard
+
+View the latest scan results as a live card dashboard:
+
+```bash
+uv run src/backend/run.py serve
+# Opens on http://localhost:8000
+```
+
+Key flags for `serve`:
+
+| Flag | Default | Description |
+|---|---|---|
+| `--db PATH` | `frigate.db` | SQLite database path |
+| `--port N` | `8000` | HTTP port |
 
 ## Scheduling (daily unattended runs)
 
@@ -96,29 +118,15 @@ FRIGATE_LOG_DIR=/var/log/frigate-scanner \
 
 See [`src/backend/README.md`](src/backend/README.md) for Docker details.
 
-## Output format
+## Data storage
 
-One JSON object per line. Example record:
+Results are persisted to `frigate.db` (SQLite). The schema tracks three tables:
 
-```json
-{
-  "url": "https://50.255.129.34",
-  "ip": "50.255.129.34",
-  "port": 443,
-  "ssl": true,
-  "country": "United States",
-  "country_code": "US",
-  "city": "Danbury",
-  "org": "Comcast Cable Communications, LLC",
-  "hostnames": ["s34.geekster.com", "frigate.geekster.com"],
-  "domains": ["geekster.com"],
-  "http_title": "Frigate",
-  "last_update": "2026-06-20T14:32:11.123456",
-  "shodan_url": "https://www.shodan.io/host/50.255.129.34"
-}
-```
+- **`scans`** — one row per run (timestamp, hosts scanned, open count)
+- **`instances`** — one row per discovered open instance (`first_seen`, `last_seen`)
+- **`cameras`** — one row per camera per instance
 
-`url` is a directly clickable link to the exposed instance. `shodan_url` links to the Shodan host detail page.
+Each scan computes a diff vs. the previous scan (new / returned / dropped instances and cameras) shown in the terminal summary and in the dashboard.
 
 ## Query strategy
 
