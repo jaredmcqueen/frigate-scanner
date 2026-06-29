@@ -107,3 +107,68 @@ class TestIndex:
     def test_stats_bar_shows_instance_count(self, seeded_client: TestClient):
         resp = seeded_client.get("/")
         assert "stat-value" in resp.text
+
+    def test_nav_link_to_trends_present(self, seeded_client: TestClient):
+        resp = seeded_client.get("/")
+        assert 'href="/trends"' in resp.text
+
+
+class TestTrends:
+    def test_missing_db_returns_200(self, db: Path):
+        client = TestClient(create_app(db))
+        resp = client.get("/trends")
+        assert resp.status_code == 200
+
+    def test_missing_db_shows_no_data_message(self, db: Path):
+        client = TestClient(create_app(db))
+        resp = client.get("/trends")
+        assert "No scan data" in resp.text
+
+    def test_single_scan_returns_html(self, seeded_client: TestClient):
+        resp = seeded_client.get("/trends")
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+
+    def test_single_scan_shows_no_chart(self, seeded_client: TestClient):
+        resp = seeded_client.get("/trends")
+        assert "Need at least 2 scans" in resp.text
+
+    def test_two_scans_renders_svg_chart(self, db: Path):
+        inst = make_instance("http://10.0.0.1:8971", ["front"])
+        _seed_db(db, [inst], now="2024-01-01T00:00:00")
+        _seed_db(db, [inst], now="2024-01-02T00:00:00")
+        client = TestClient(create_app(db))
+        resp = client.get("/trends")
+        assert resp.status_code == 200
+        assert "<svg" in resp.text
+        assert "<polyline" in resp.text
+
+    def test_trends_shows_scan_count_in_stats_bar(self, db: Path):
+        inst = make_instance("http://10.0.0.1:8971", ["front"])
+        _seed_db(db, [inst], now="2024-01-01T00:00:00")
+        _seed_db(db, [inst], now="2024-01-02T00:00:00")
+        client = TestClient(create_app(db))
+        resp = client.get("/trends")
+        assert "2" in resp.text  # 2 scans in stat bar
+
+    def test_dropped_instance_appears_in_trends(self, db: Path):
+        inst1 = make_instance("http://10.0.0.1:8971", ["front"])
+        inst2 = make_instance("http://10.0.0.2:8971", ["back"])
+        _seed_db(db, [inst1, inst2], now="2024-01-01T00:00:00")
+        _seed_db(db, [inst1], now="2024-01-02T00:00:00")  # inst2 drops off
+        client = TestClient(create_app(db))
+        resp = client.get("/trends")
+        assert "10.0.0.2" in resp.text
+
+    def test_longevity_table_shows_active_instances(self, db: Path):
+        inst = make_instance("http://10.0.0.1:8971", ["front"])
+        _seed_db(db, [inst], now="2024-01-01T00:00:00")
+        _seed_db(db, [inst], now="2024-01-02T00:00:00")
+        client = TestClient(create_app(db))
+        resp = client.get("/trends")
+        assert "10.0.0.1" in resp.text
+        assert "2024-01-01" in resp.text  # first_seen date
+
+    def test_nav_link_to_live_view_present(self, seeded_client: TestClient):
+        resp = seeded_client.get("/trends")
+        assert 'href="/"' in resp.text
