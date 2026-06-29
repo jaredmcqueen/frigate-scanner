@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template — replace INSTALL_DIR and HOME_DIR before loading.
+  Quickstart (run from the project root):
+
+      sed \
+        -e "s|INSTALL_DIR|$(pwd)|g" \
+        -e "s|HOME_DIR|$HOME|g" \
+        launchd/com.frigate-scanner.daily.plist \
+        > ~/Library/LaunchAgents/com.frigate-scanner.daily.plist
+
+      launchctl load ~/Library/LaunchAgents/com.frigate-scanner.daily.plist
+-->
+<plist version="1.0">
+<dict>
+    <!-- Unique label for launchd -->
+    <key>Label</key>
+    <string>com.frigate-scanner.daily</string>
+
+    <!-- Calls the wrapper script that loads .env and resolves absolute paths -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>INSTALL_DIR/scripts/run-daily.sh</string>
+    </array>
+
+    <!-- Run daily at 06:00 local time; adjust Hour/Minute as needed -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>6</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- Belt-and-suspenders: also capture any bash-level errors here -->
+    <key>StandardOutPath</key>
+    <string>HOME_DIR/Library/Logs/frigate-scanner/launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>HOME_DIR/Library/Logs/frigate-scanner/launchd.log</string>
+
+    <!-- launchd inherits a minimal environment; set HOME so ~ resolves correctly -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>HOME_DIR</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <!-- Do not run immediately on load — wait for the scheduled time -->
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

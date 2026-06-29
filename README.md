@@ -22,25 +22,79 @@ SHODAN_API_KEY=your_key_here
 
 ## Usage
 
-```bash
-cd src/backend
-uv run scan.py                              # → frigate_hosts_<ts>.jsonl
-uv run check_open.py frigate_hosts_*.jsonl  # → frigate.db + frigate_open_<ts>.html
-```
-
-Output is written to timestamped files in the current directory:
-
-```
-frigate_hosts_20260626T143000Z.jsonl
-```
-
-Progress and status messages go to **stderr**; the JSONL goes to the file. To also capture stderr:
+Run a full scan cycle (search → probe → store → summary):
 
 ```bash
-uv run scan.py 2>scan.log
+uv run src/backend/run.py run
 ```
 
-See [`src/backend/README.md`](src/backend/README.md) for details on the second script and Docker.
+Key flags:
+
+| Flag | Default | Description |
+|---|---|---|
+| `--db PATH` | `frigate.db` | SQLite database path |
+| `--out-dir DIR` | `.` | Directory for JSONL/HTML output |
+| `--workers N` | `20` | Concurrent probe workers |
+| `--timeout SECS` | `10.0` | Per-request timeout |
+
+## Scheduling (daily unattended runs)
+
+### macOS — launchd
+
+A ready-to-use plist template and wrapper script live in [`launchd/`](launchd/) and [`scripts/`](scripts/). Install from the project root:
+
+```bash
+# 1. Stamp absolute paths into the plist template and install it
+sed \
+  -e "s|INSTALL_DIR|$(pwd)|g" \
+  -e "s|HOME_DIR|$HOME|g" \
+  launchd/com.frigate-scanner.daily.plist \
+  > ~/Library/LaunchAgents/com.frigate-scanner.daily.plist
+
+# 2. Make the wrapper executable
+chmod +x scripts/run-daily.sh
+
+# 3. Load the agent (starts the daily schedule — no immediate run)
+launchctl load ~/Library/LaunchAgents/com.frigate-scanner.daily.plist
+```
+
+The agent runs at **06:00 local time** by default. Edit `StartCalendarInterval` in the installed plist to change the time.
+
+Log output appends to:
+- `~/Library/Logs/frigate-scanner/scanner.log` — full run output (set by the wrapper)
+- `~/Library/Logs/frigate-scanner/launchd.log` — launchd-level stdout/stderr
+
+To run immediately for testing:
+
+```bash
+launchctl start com.frigate-scanner.daily
+```
+
+To uninstall:
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.frigate-scanner.daily.plist
+rm ~/Library/LaunchAgents/com.frigate-scanner.daily.plist
+```
+
+### Linux / cron
+
+Add a crontab entry (run `crontab -e`):
+
+```cron
+# Run frigate-scanner daily at 06:00
+0 6 * * * /path/to/frigate-scanner/scripts/run-daily.sh
+```
+
+The wrapper script resolves all paths relative to itself, so no `cd` is needed. Logs go to `~/.local/share/frigate-scanner/` (data) and `~/Library/Logs/frigate-scanner/` (logs). Override with environment variables before calling the script:
+
+```bash
+FRIGATE_DATA_DIR=/var/lib/frigate-scanner \
+FRIGATE_LOG_DIR=/var/log/frigate-scanner \
+  scripts/run-daily.sh
+```
+
+See [`src/backend/README.md`](src/backend/README.md) for Docker details.
 
 ## Output format
 
