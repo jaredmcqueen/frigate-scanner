@@ -6,10 +6,12 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.responses import HTMLResponse
 
-from frigate_scanner.report import render_html
+from frigate_scanner.report import render_cards_fragment, render_detail_fragment, render_shell
+
+PAGE_SIZE = 20
 
 _TRENDS_STYLE = """
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -256,54 +258,80 @@ def _render_trends(conn: sqlite3.Connection) -> str:
     return html
 
 
-def _render_dashboard(conn: sqlite3.Connection) -> str:
+def _render_cards_fragment(conn: sqlite3.Connection, country: str, q: str, page: int) -> str:
     scan_row = conn.execute(
         "SELECT id, scanned_at FROM scans ORDER BY id DESC LIMIT 1"
     ).fetchone()
     if scan_row is None:
-        return "<h1>No scan data yet.</h1>"
+        return "<p>No scan data yet.</p>"
 
     scan_id: int = scan_row["id"]
     scan_ts: str = scan_row["scanned_at"]
-    scanned_at: str = scan_ts[:16].replace("T", " ") + " UTC"
+    q_like = f"%{q}%" if q else ""
 
+    totals = conn.execute(
+        "SELECT COUNT(*) AS cnt, COALESCE(SUM(camera_count), 0) AS cams FROM instances "
+        "WHERE last_scan_id = ? "
+        "AND (? = '' OR country_code = ?) "
+        "AND (? = '' OR url LIKE ? OR COALESCE(org, '') LIKE ?)",
+        (scan_id, country, country, q_like, q_like, q_like),
+    ).fetchone()
+    total: int = totals["cnt"]
+    total_cameras: int = totals["cams"]
+
+    offset = (page - 1) * PAGE_SIZE
     instance_rows = conn.execute(
-        "SELECT url, port, country_code, org, frigate_version, camera_count, first_seen "
-        "FROM instances WHERE last_scan_id = ?",
+        "SELECT url, port, country, country_code, org, frigate_version, camera_count, "
+        "first_seen, last_seen FROM instances "
+        "WHERE last_scan_id = ? "
+        "AND (? = '' OR country_code = ?) "
+        "AND (? = '' OR url LIKE ? OR COALESCE(org, '') LIKE ?) "
+        "ORDER BY url LIMIT ? OFFSET ?",
+        (scan_id, country, country, q_like, q_like, q_like, PAGE_SIZE, offset),
+    ).fetchall()
+    instances = [dict(r) for r in instance_rows]
+
+    if instances:
+        urls = [inst["url"] for inst in instances]
+        placeholders = ",".join("?" * len(urls))
+        cam_rows = conn.execute(
+            f"SELECT instance_url, name, first_seen, last_seen FROM cameras "
+            f"WHERE instance_url IN ({placeholders}) AND last_scan_id = ? "
+            f"ORDER BY instance_url, name",
+            (*urls, scan_id),
+        ).fetchall()
+        cams_by_url: dict[str, list[dict]] = {}
+        for c in cam_rows:
+            cams_by_url.setdefault(c["instance_url"], []).append(
+                {"name": c["name"], "first_seen": c["first_seen"], "last_seen": c["last_seen"]}
+            )
+        for inst in instances:
+            inst["cameras"] = cams_by_url.get(inst["url"], [])
+            inst["is_new"] = inst["first_seen"] == scan_ts
+
+    country_rows = conn.execute(
+        "SELECT DISTINCT country_code FROM instances "
+        "WHERE last_scan_id = ? AND country_code IS NOT NULL ORDER BY country_code",
         (scan_id,),
     ).fetchall()
+    countries = [r["country_code"] for r in country_rows]
 
+    return render_cards_fragment(
+        instances, countries, total, total_cameras, page, PAGE_SIZE, country, q
+    )
+
+
+def _render_instance_detail(conn: sqlite3.Connection, url: str) -> str | None:
+    inst_row = conn.execute("SELECT * FROM instances WHERE url = ?", (url,)).fetchone()
+    if inst_row is None:
+        return None
+    instance = dict(inst_row)
     cam_rows = conn.execute(
-        "SELECT instance_url, name, first_seen FROM cameras WHERE last_scan_id = ? "
-        "ORDER BY instance_url, name",
-        (scan_id,),
+        "SELECT name, first_seen, last_seen FROM cameras WHERE instance_url = ? ORDER BY name",
+        (url,),
     ).fetchall()
-
-    cams_by_url: dict[str, list[tuple[str, str]]] = {}
-    for c in cam_rows:
-        cams_by_url.setdefault(c["instance_url"], []).append((c["name"], c["first_seen"]))
-
-    instances = []
-    for r in instance_rows:
-        url = r["url"]
-        cam_entries = cams_by_url.get(url, [])
-        cam_names = [name for name, _ in cam_entries]
-        is_new = r["first_seen"] == scan_ts
-        new_cameras = {name for name, first in cam_entries if first == scan_ts}
-        instances.append({
-            "url": url,
-            "port": r["port"],
-            "country_code": r["country_code"],
-            "org": r["org"],
-            "frigate_version": r["frigate_version"],
-            "probe_camera_count": r["camera_count"] or 0,
-            "probe_cameras": cam_names,
-            "frigate_uptime_days": None,
-            "is_new": is_new,
-            "new_cameras": new_cameras,
-        })
-
-    return render_html(instances, scanned_at)
+    cameras = [dict(r) for r in cam_rows]
+    return render_detail_fragment(instance, cameras)
 
 
 def create_app(db_path: Path) -> FastAPI:
@@ -315,13 +343,32 @@ def create_app(db_path: Path) -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
+        return render_shell()
+
+    @app.get("/fragments/cards", response_class=HTMLResponse)
+    def cards_fragment(country: str = "", q: str = "", page: int = 1) -> str:
         try:
             conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         except sqlite3.OperationalError:
-            return "<h1>No scan data yet.</h1>"
+            return "<p>No scan data yet.</p>"
         conn.row_factory = sqlite3.Row
         try:
-            return _render_dashboard(conn)
+            return _render_cards_fragment(conn, country, q, page)
+        finally:
+            conn.close()
+
+    @app.get("/instance", response_class=HTMLResponse)
+    def instance_detail(url: str) -> Response:
+        try:
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        except sqlite3.OperationalError:
+            return Response(content="No scan data yet.", status_code=404)
+        conn.row_factory = sqlite3.Row
+        try:
+            html = _render_instance_detail(conn, url)
+            if html is None:
+                return Response(content="Instance not found.", status_code=404)
+            return HTMLResponse(content=html)
         finally:
             conn.close()
 
