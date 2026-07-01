@@ -11,11 +11,14 @@ from rich.console import Console
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, SpinnerColumn, TextColumn
 
 QUERIES = [
-    'http.title:"Live - Frigate"',
+    # Static <title>Frigate</title> from index.html — every recent release uses this;
+    # the "Live - Frigate" text seen in a browser tab is set by client-side JS after
+    # load and never appears in the raw HTML Shodan indexes, so it's not worth a variant.
     'http.title:"Frigate"',
-    'title:"Live - Frigate"',
-    'title:"Frigate"',
-    'html:"Live - Frigate"',
+    # Wider net for hosts where Shodan captured the body but not a clean title match.
+    # Pulls in unrelated hosts too (e.g. dashboards that merely link to Frigate), but
+    # probe.py verifies every candidate against /api/stats before it's kept.
+    'http.html:"Frigate"',
 ]
 
 PAGE_SIZE = 100  # Shodan's fixed page size
@@ -54,21 +57,24 @@ def shape(host: dict) -> dict:
     }
 
 
-def find_query(api: shodan.Shodan) -> tuple[str, int, list[dict]] | tuple[None, int, list]:
-    """Return the first query that has results, the total count, and page-1 matches."""
+def plan_queries(api: shodan.Shodan) -> list[tuple[str, int]]:
+    """Return (query, total) for every query variant with at least one result.
+
+    Uses the count endpoint, which is free and doesn't touch query credits,
+    so every variant can be checked before spending anything on search pages.
+    """
+    plans: list[tuple[str, int]] = []
     for query in QUERIES:
-        _console.print(f'[bold]Trying:[/bold] [cyan]{query}[/cyan]')
         try:
-            results = api.search(query, page=1)
+            total = api.count(query).get("total", 0)
         except shodan.APIError as e:
-            _console.print(f"  [red]failed:[/red] {e}")
+            _console.print(f'[bold]{query}[/bold]  [red]failed:[/red] {e}')
             continue
-        total = results.get("total", 0)
-        matches = results.get("matches", [])
-        _console.print(f"  total={total}\n")
+        _console.print(f'[bold]{query}[/bold]  total={total}')
         if total > 0:
-            return query, total, matches
-    return None, 0, []
+            plans.append((query, total))
+    _console.print("")
+    return plans
 
 
 def run(api_key: str, *, jsonl_out: Path | None = None) -> list[dict]:
@@ -91,31 +97,26 @@ def run(api_key: str, *, jsonl_out: Path | None = None) -> list[dict]:
         _console.print(f"[red]Could not fetch account info:[/red] {e}")
         raise
 
-    query, total, page1_matches = find_query(api)
-    if query is None:
+    plans = plan_queries(api)
+    if not plans:
         _console.print("[yellow]No results across all query variants.[/yellow]")
         return []
 
-    pages_needed = math.ceil(total / PAGE_SIZE)
-    credits_remaining_after_probe = query_credits - 1
-    credits_for_remaining = pages_needed - 1
-    _console.print(f"[green]Query:[/green]       {query}")
-    _console.print(f"[green]Total hosts:[/green] {total}")
-    _console.print(f"[green]Pages:[/green]       {pages_needed}  ({PAGE_SIZE}/page)")
-    _console.print(
-        f"[green]Credits needed:[/green] {credits_for_remaining} more  "
-        f"(you have {credits_remaining_after_probe} left after probe)\n"
-    )
+    pages_wanted = [(query, math.ceil(total / PAGE_SIZE)) for query, total in plans]
+    total_pages_wanted = sum(pages for _, pages in pages_wanted)
+    _console.print(f"[green]Queries:[/green]       {len(plans)}")
+    _console.print(f"[green]Total hosts:[/green]   {sum(t for _, t in plans)}  (before de-dup)")
+    _console.print(f"[green]Pages wanted:[/green]  {total_pages_wanted}  ({PAGE_SIZE}/page)")
+    _console.print(f"[green]Credits available:[/green] {query_credits}\n")
 
-    if credits_for_remaining > credits_remaining_after_probe:
-        extra_pages_possible = max(credits_remaining_after_probe, 0)
-        pages_needed = 1 + extra_pages_possible
+    if total_pages_wanted > query_credits:
         _console.print(
             f"[yellow]Warning:[/yellow] Credits will run out before all pages are fetched. "
-            f"Will fetch {pages_needed} page(s) (~{pages_needed * PAGE_SIZE} hosts)."
+            f"Will fetch at most {query_credits} page(s) total, spent on queries in order."
         )
 
-    records: list[dict] = []
+    records: dict[tuple[str, int], dict] = {}
+    credits_left = query_credits
 
     with Progress(
         SpinnerColumn(),
@@ -124,29 +125,33 @@ def run(api_key: str, *, jsonl_out: Path | None = None) -> list[dict]:
         MofNCompleteColumn(),
         console=_console,
     ) as progress:
-        task = progress.add_task("Fetching pages", total=pages_needed)
+        task = progress.add_task("Fetching pages", total=min(total_pages_wanted, max(query_credits, 0)))
 
-        for host in page1_matches:
-            records.append(shape(host))
-        progress.advance(task)
+        for query, pages_needed in pages_wanted:
+            for page in range(1, pages_needed + 1):
+                if credits_left <= 0:
+                    break
+                try:
+                    results = api.search(query, page=page)
+                except shodan.APIError as e:
+                    _console.print(f"\n[red]{query} page {page} failed:[/red] {e}")
+                    break
+                credits_left -= 1
 
-        for page in range(2, pages_needed + 1):
-            try:
-                results = api.search(query, page=page)
-            except shodan.APIError as e:
-                _console.print(f"\n[red]Page {page} failed:[/red] {e}")
+                for host in results.get("matches", []):
+                    record = shape(host)
+                    records.setdefault((record["ip"], record["port"]), record)
+
+                progress.advance(task)
+            if credits_left <= 0:
                 break
 
-            for host in results.get("matches", []):
-                records.append(shape(host))
-
-            progress.advance(task)
-
-    _console.print(f"\n[green]Done.[/green] Found {len(records)} hosts.")
+    records_list = list(records.values())
+    _console.print(f"\n[green]Done.[/green] Found {len(records_list)} unique hosts.")
 
     if jsonl_out is not None:
         jsonl_out = Path(jsonl_out)
-        jsonl_out.write_text("\n".join(json.dumps(r) for r in records) + "\n")
+        jsonl_out.write_text("\n".join(json.dumps(r) for r in records_list) + "\n")
         _console.print(f"Wrote JSONL → [bold]{jsonl_out}[/bold]")
 
-    return records
+    return records_list

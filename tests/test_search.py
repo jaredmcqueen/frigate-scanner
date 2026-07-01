@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import shodan
 
-from frigate_scanner.search import build_url, find_query, shape
+from frigate_scanner.search import build_url, plan_queries, shape
 
 
 class TestBuildUrl:
@@ -102,39 +102,36 @@ class TestShape:
         assert result["url"] == "http://[::1]:8080"
 
 
-class TestFindQuery:
-    def test_returns_first_query_with_results(self):
+class TestPlanQueries:
+    def test_includes_every_query_with_results(self):
         api = MagicMock()
-        api.search.return_value = {"total": 5, "matches": [{"ip_str": "1.2.3.4"}]}
-        query, total, matches = find_query(api)
-        assert query is not None
-        assert total == 5
-        assert len(matches) == 1
+        api.count.return_value = {"total": 5}
+        plans = plan_queries(api)
+        assert len(plans) == 2
+        assert all(total == 5 for _, total in plans)
 
-    def test_skips_errored_query_tries_next(self):
+    def test_skips_errored_query_keeps_others(self):
         api = MagicMock()
-        api.search.side_effect = [
+        api.count.side_effect = [
             shodan.APIError("quota exceeded"),
-            {"total": 3, "matches": [{"ip_str": "9.9.9.9"}]},
+            {"total": 3},
         ]
-        query, total, matches = find_query(api)
-        assert total == 3
-        assert matches[0]["ip_str"] == "9.9.9.9"
+        plans = plan_queries(api)
+        assert len(plans) == 1
+        assert plans[0][1] == 3
 
-    def test_all_queries_fail_returns_none(self):
+    def test_all_queries_fail_returns_empty(self):
         api = MagicMock()
-        api.search.side_effect = shodan.APIError("fail")
-        query, total, matches = find_query(api)
-        assert query is None
-        assert total == 0
-        assert matches == []
+        api.count.side_effect = shodan.APIError("fail")
+        plans = plan_queries(api)
+        assert plans == []
 
-    def test_zero_total_tries_next_query(self):
+    def test_zero_total_query_excluded(self):
         api = MagicMock()
-        api.search.side_effect = [
-            {"total": 0, "matches": []},
-            {"total": 2, "matches": [{"ip_str": "1.1.1.1"}, {"ip_str": "2.2.2.2"}]},
+        api.count.side_effect = [
+            {"total": 0},
+            {"total": 2},
         ]
-        query, total, matches = find_query(api)
-        assert total == 2
-        assert len(matches) == 2
+        plans = plan_queries(api)
+        assert len(plans) == 1
+        assert plans[0][1] == 2
