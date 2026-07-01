@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from frigate_scanner.dashboard import create_app
-from frigate_scanner.store import SCHEMA, record_scan
+from frigate_scanner.store import record_scan
 
 
 def _seed_db(db_path: Path, instances: list[dict], now: str = "2024-01-01T00:00:00") -> None:

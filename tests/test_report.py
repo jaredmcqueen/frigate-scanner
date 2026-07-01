@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-import pytest
 
 from frigate_scanner.report import (
     render_cards_fragment,

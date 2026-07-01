@@ -2,7 +2,6 @@
 
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 
 from frigate_scanner.probe import _check, _extract_frigate_info
 

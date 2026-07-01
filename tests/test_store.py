@@ -2,7 +2,6 @@
 
 import sqlite3
 
-import pytest
 
 from frigate_scanner.store import Diff, ensure_schema, record_scan, toggle_starred
 
