@@ -10,6 +10,7 @@ from fastapi import FastAPI, Response
 from fastapi.responses import HTMLResponse
 
 from frigate_scanner.report import render_cards_fragment, render_detail_fragment, render_shell
+from frigate_scanner.store import ensure_schema, toggle_starred
 
 PAGE_SIZE = 20
 
@@ -282,11 +283,11 @@ def _render_cards_fragment(conn: sqlite3.Connection, country: str, q: str, page:
     offset = (page - 1) * PAGE_SIZE
     instance_rows = conn.execute(
         "SELECT url, port, country, country_code, org, frigate_version, camera_count, "
-        "first_seen, last_seen FROM instances "
+        "first_seen, last_seen, starred FROM instances "
         "WHERE last_scan_id = ? "
         "AND (? = '' OR country_code = ?) "
         "AND (? = '' OR url LIKE ? OR COALESCE(org, '') LIKE ?) "
-        "ORDER BY url LIMIT ? OFFSET ?",
+        "ORDER BY starred DESC, url LIMIT ? OFFSET ?",
         (scan_id, country, country, q_like, q_like, q_like, PAGE_SIZE, offset),
     ).fetchall()
     instances = [dict(r) for r in instance_rows]
@@ -335,6 +336,9 @@ def _render_instance_detail(conn: sqlite3.Connection, url: str) -> str | None:
 
 
 def create_app(db_path: Path) -> FastAPI:
+    if db_path.exists():
+        ensure_schema(db_path)
+
     app = FastAPI(title="Frigate Scanner Dashboard")
 
     @app.get("/health")
@@ -354,6 +358,21 @@ def create_app(db_path: Path) -> FastAPI:
         conn.row_factory = sqlite3.Row
         try:
             return _render_cards_fragment(conn, country, q, page)
+        finally:
+            conn.close()
+
+    @app.post("/instance/star", response_class=HTMLResponse)
+    def star_instance(url: str, country: str = "", q: str = "") -> Response:
+        new_state = toggle_starred(db_path, url)
+        if new_state is None:
+            return Response(content="Instance not found.", status_code=404)
+        try:
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        except sqlite3.OperationalError:
+            return HTMLResponse(content="<p>No scan data yet.</p>")
+        conn.row_factory = sqlite3.Row
+        try:
+            return HTMLResponse(content=_render_cards_fragment(conn, country, q, 1))
         finally:
             conn.close()
 

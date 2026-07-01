@@ -124,6 +124,7 @@ def make_card(
     org: str | None = "Acme Corp",
     cameras: list[str] | None = None,
     is_new: bool = False,
+    starred: bool = False,
 ) -> dict:
     cam_names = cameras if cameras is not None else ["front", "back"]
     return {
@@ -141,6 +142,7 @@ def make_card(
         "first_seen": "2024-01-01T00:00:00",
         "last_seen": "2024-01-02T00:00:00",
         "is_new": is_new,
+        "starred": starred,
     }
 
 
@@ -218,6 +220,23 @@ class TestRenderCardsFragment:
         card = make_card(url='http://evil.com/<script>alert(1)</script>')
         html = render_cards_fragment([card], ["US"], 1, 2, 1, 20, "", "")
         assert "<script>alert(1)</script>" not in html
+
+    def test_star_button_present_for_each_card(self):
+        card = make_card()
+        html = render_cards_fragment([card], ["US"], 1, 2, 1, 20, "", "")
+        assert "star-btn" in html
+        assert 'hx-post="/instance/star?url=' in html
+
+    def test_starred_card_marked(self):
+        card = make_card(starred=True)
+        html = render_cards_fragment([card], ["US"], 1, 2, 1, 20, "", "")
+        assert "star-btn is-starred" in html
+        assert "card is-starred" in html
+
+    def test_unstarred_card_not_marked(self):
+        card = make_card(starred=False)
+        html = render_cards_fragment([card], ["US"], 1, 2, 1, 20, "", "")
+        assert "star-btn is-starred" not in html
 
 
 class TestRenderDetailFragment:

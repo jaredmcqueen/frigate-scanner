@@ -230,6 +230,10 @@ SHELL_TEMPLATE = """<!DOCTYPE html>
   .badge-country { background: #1e3a5f; color: #7dd3fc; }
   .badge-new { background: #166534; color: #86efac; }
   .card.is-new { border-color: #22c55e; }
+  .card.is-starred { border-color: #facc15; }
+  .star-btn { background: none; border: none; cursor: pointer; font-size: 1.125rem; line-height: 1; color: #475569; padding: 0; flex-shrink: 0; }
+  .star-btn:hover { color: #facc15; }
+  .star-btn.is-starred { color: #facc15; }
   .meta { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.875rem; }
   .meta-item { font-size: 0.75rem; color: #64748b; display: flex; align-items: center; gap: 0.3rem; }
   .meta-item strong { color: #94a3b8; }
@@ -311,12 +315,21 @@ CARDS_FRAGMENT_TEMPLATE = """
 </div>
 <div class="grid">
 {% for r in instances %}
-  <div class="card{{ ' is-new' if r.is_new else '' }}"
+  <div class="card{{ ' is-new' if r.is_new else '' }}{{ ' is-starred' if r.starred else '' }}"
     hx-get="/instance?url={{ r.url|urlencode }}"
     hx-target="#detail-panel"
     hx-swap="innerHTML">
     <div class="card-header">
-      <a class="card-url" href="{{ r.url }}" target="_blank" rel="noopener" onclick="event.stopPropagation()">{{ r.url }}</a>
+      <div style="display:flex;gap:0.5rem;align-items:flex-start;min-width:0">
+        <button type="button" class="star-btn{{ ' is-starred' if r.starred else '' }}"
+          hx-post="/instance/star?url={{ r.url|urlencode }}"
+          hx-include="#search-input,#country-input"
+          hx-target="#filterable"
+          hx-swap="innerHTML"
+          onclick="event.stopPropagation()"
+          title="{{ 'Unstar' if r.starred else 'Star' }}">{{ '★' if r.starred else '☆' }}</button>
+        <a class="card-url" href="{{ r.url }}" target="_blank" rel="noopener" onclick="event.stopPropagation()">{{ r.url }}</a>
+      </div>
       <div style="display:flex;gap:0.35rem;flex-wrap:wrap;justify-content:flex-end">
         {% if r.is_new %}<span class="badge badge-new">NEW</span>{% endif %}
         {% if r.country_code %}<span class="badge badge-country">{{ r.country_code }}</span>{% endif %}

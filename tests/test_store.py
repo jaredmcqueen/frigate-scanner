@@ -1,8 +1,10 @@
 """Unit tests for frigate_scanner.store — Diff and record_scan transitions."""
 
+import sqlite3
+
 import pytest
 
-from frigate_scanner.store import Diff, record_scan
+from frigate_scanner.store import Diff, ensure_schema, record_scan, toggle_starred
 
 URL_A = "http://192.168.1.1:8971"
 URL_B = "http://192.168.1.2:8971"
@@ -117,3 +119,68 @@ class TestRecordScan:
         assert len(diff.dropped_instances) == 2
         dropped_urls = {d["url"] for d in diff.dropped_instances}
         assert dropped_urls == {URL_A, URL_B}
+
+    def test_rescan_preserves_starred_flag(self, tmp_path):
+        db = tmp_path / "test.db"
+        do_scan(db, [make_instance(URL_A, ["cam1"])], now="2024-01-01T00:00:00")
+        toggle_starred(db, URL_A)
+        do_scan(db, [make_instance(URL_A, ["cam1"])], now="2024-01-02T00:00:00")
+        conn = sqlite3.connect(db)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT starred FROM instances WHERE url = ?", (URL_A,)).fetchone()
+        conn.close()
+        assert row["starred"] == 1
+
+
+class TestToggleStarred:
+    def test_first_toggle_stars_instance(self, tmp_path):
+        db = tmp_path / "test.db"
+        do_scan(db, [make_instance(URL_A, ["cam1"])])
+        assert toggle_starred(db, URL_A) is True
+
+    def test_second_toggle_unstars_instance(self, tmp_path):
+        db = tmp_path / "test.db"
+        do_scan(db, [make_instance(URL_A, ["cam1"])])
+        toggle_starred(db, URL_A)
+        assert toggle_starred(db, URL_A) is False
+
+    def test_unknown_url_returns_none(self, tmp_path):
+        db = tmp_path / "test.db"
+        do_scan(db, [make_instance(URL_A, ["cam1"])])
+        assert toggle_starred(db, "http://unknown:9999") is None
+
+    def test_toggle_persists_across_connections(self, tmp_path):
+        db = tmp_path / "test.db"
+        do_scan(db, [make_instance(URL_A, ["cam1"])])
+        toggle_starred(db, URL_A)
+        conn = sqlite3.connect(db)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT starred FROM instances WHERE url = ?", (URL_A,)).fetchone()
+        conn.close()
+        assert row["starred"] == 1
+
+
+class TestEnsureSchema:
+    def test_migrates_legacy_db_missing_starred_column(self, tmp_path):
+        db = tmp_path / "test.db"
+        legacy_schema = """
+        CREATE TABLE instances (
+            url TEXT PRIMARY KEY, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL
+        );
+        """
+        conn = sqlite3.connect(db)
+        conn.executescript(legacy_schema)
+        conn.execute(
+            "INSERT INTO instances (url, first_seen, last_seen) VALUES (?, ?, ?)",
+            (URL_A, "2024-01-01T00:00:00", "2024-01-01T00:00:00"),
+        )
+        conn.commit()
+        conn.close()
+
+        ensure_schema(db)
+
+        conn = sqlite3.connect(db)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT starred FROM instances WHERE url = ?", (URL_A,)).fetchone()
+        conn.close()
+        assert row["starred"] == 0

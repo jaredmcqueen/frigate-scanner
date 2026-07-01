@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS instances (
     camera_count    INTEGER,
     first_seen      TEXT NOT NULL,
     last_seen       TEXT NOT NULL,
-    last_scan_id    INTEGER
+    last_scan_id    INTEGER,
+    starred         INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS cameras (
@@ -37,6 +38,42 @@ CREATE TABLE IF NOT EXISTS cameras (
     PRIMARY KEY (instance_url, name)
 );
 """
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add columns introduced after a DB's creation (older DBs won't have them)."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(instances)")}
+    if "starred" not in cols:
+        conn.execute("ALTER TABLE instances ADD COLUMN starred INTEGER NOT NULL DEFAULT 0")
+
+
+def ensure_schema(db_path: Path) -> None:
+    """Create tables if missing and migrate an existing DB to the current schema."""
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(SCHEMA)
+        _migrate(conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def toggle_starred(db_path: Path, url: str) -> bool | None:
+    """Flip the starred flag for an instance. Returns the new value, or None if unknown."""
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.executescript(SCHEMA)
+        _migrate(conn)
+        row = conn.execute("SELECT starred FROM instances WHERE url = ?", (url,)).fetchone()
+        if row is None:
+            return None
+        new_value = 0 if row["starred"] else 1
+        conn.execute("UPDATE instances SET starred = ? WHERE url = ?", (new_value, url))
+        conn.commit()
+        return bool(new_value)
+    finally:
+        conn.close()
 
 
 @dataclass(frozen=True)
@@ -68,6 +105,7 @@ def record_scan(
     conn.row_factory = sqlite3.Row
     try:
         conn.executescript(SCHEMA)
+        _migrate(conn)
 
         prev_scan_id = conn.execute("SELECT MAX(id) AS m FROM scans").fetchone()["m"]
         existing_urls = {r["url"] for r in conn.execute("SELECT url FROM instances")}

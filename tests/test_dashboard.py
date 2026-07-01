@@ -175,6 +175,40 @@ class TestCardsFragment:
         assert "stat-value" in resp.text
 
 
+class TestStarInstance:
+    def test_star_returns_200(self, seeded_client: TestClient):
+        resp = seeded_client.post("/instance/star", params={"url": "http://10.0.0.1:8971"})
+        assert resp.status_code == 200
+
+    def test_star_marks_button_as_starred(self, seeded_client: TestClient):
+        resp = seeded_client.post("/instance/star", params={"url": "http://10.0.0.1:8971"})
+        assert "star-btn is-starred" in resp.text
+
+    def test_toggle_twice_unstars(self, seeded_client: TestClient):
+        seeded_client.post("/instance/star", params={"url": "http://10.0.0.1:8971"})
+        resp = seeded_client.post("/instance/star", params={"url": "http://10.0.0.1:8971"})
+        assert "star-btn is-starred" not in resp.text
+
+    def test_starred_instance_sorts_first(self, db: Path):
+        _seed_db(db, [
+            make_instance("http://a.example:8971", ["cam1"]),
+            make_instance("http://z.example:8971", ["cam2"]),
+        ])
+        client = TestClient(create_app(db))
+        client.post("/instance/star", params={"url": "http://z.example:8971"})
+        resp = client.get("/fragments/cards")
+        assert resp.text.index("z.example") < resp.text.index("a.example")
+
+    def test_unknown_url_returns_404(self, seeded_client: TestClient):
+        resp = seeded_client.post("/instance/star", params={"url": "http://unknown:9999"})
+        assert resp.status_code == 404
+
+    def test_missing_db_returns_404(self, db: Path):
+        client = TestClient(create_app(db))
+        resp = client.post("/instance/star", params={"url": "http://10.0.0.1:8971"})
+        assert resp.status_code == 404
+
+
 class TestInstanceDetail:
     def test_returns_200_for_known_url(self, seeded_client: TestClient):
         resp = seeded_client.get("/instance", params={"url": "http://10.0.0.1:8971"})
