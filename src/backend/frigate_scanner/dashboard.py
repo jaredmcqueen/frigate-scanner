@@ -287,8 +287,8 @@ def _render_cards_fragment(conn: sqlite3.Connection, country: str, q: str, page:
         "WHERE last_scan_id = ? "
         "AND (? = '' OR country_code = ?) "
         "AND (? = '' OR url LIKE ? OR COALESCE(org, '') LIKE ?) "
-        "ORDER BY starred DESC, url LIMIT ? OFFSET ?",
-        (scan_id, country, country, q_like, q_like, q_like, PAGE_SIZE, offset),
+        "ORDER BY starred DESC, (first_seen = ?) DESC, url LIMIT ? OFFSET ?",
+        (scan_id, country, country, q_like, q_like, q_like, scan_ts, PAGE_SIZE, offset),
     ).fetchall()
     instances = [dict(r) for r in instance_rows]
 
